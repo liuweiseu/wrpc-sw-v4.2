@@ -1,0 +1,15 @@
+*.map*
+*.o
+*.a
+ppsi.bin
+*.patch
+*~
+/ppsi
+
+*.cmd
+*.o
+.tmp_*
+.config
+.config.old
+include/config
+include/generated

@@ -1,0 +1,208 @@
+
+mainmenu "PPSi configuration"
+
+choice
+	prompt "Architecture to build for"
+
+config ARCH_UNIX
+	bool "Unix (Linux and likely other systems)"
+	select HAS_VLAN
+	select HAS_MULTIPLE_VLAN
+	help
+	  ARCH=unix supports standard Unix system calls, although
+	  the code most likely includes some Linux dependencies.
+	  Choose this architecture if you build for a Linux PC
+	  or embedded system
+
+config ARCH_BARE_I386
+	bool "Bare i386"
+	help
+	  This architecture builds a Linux-i386 executable that
+	  does not rely on the standard C library, but makes
+	  system calls directly.  This architecture is a test case
+	  to ensure the code can run in freestanding environments
+	  (microcontrollers or other contexts with no operating system)
+
+config ARCH_BARE_X86_64
+	bool "Bare x86-64"
+	help
+	  This architecture builds a Linux-x86-64 executable that
+	  does not rely on the standard C library, but makes
+	  system calls directly.  This architecture is a test case
+	  to ensure the code can run in freestanding environments
+	  (microcontrollers or other contexts with no operating system)
+
+config ARCH_WRPC
+	bool "White Rabbit PTP Core (WR Node)"
+	select HAS_VLAN
+	help
+	  Build PPSi for use in the WRPC environment (SPEC card or similar
+	  one).  This is a freestanding build, without operating system.
+	  The configuration selects the "White Rabbit" protocol extension.
+
+config ARCH_WRS
+	bool "White Rabbit Switch"
+	select HAS_VLAN
+	select HAS_MULTIPLE_VLAN
+	help
+	  Build PPSi for use in the WR switch. The computer is a standard
+	  ARM-Linux host with hardware timestamping and internal PLLs
+	  needed to achieve sub-ns synchronization.
+	  The configuration selects the "White Rabbit" protocol extension.
+
+config ARCH_SIMULATOR
+	bool "PPSi Simulator (hosted on Linux)"
+	help
+	  Build a PPSi simulator. It's almost a unix full running slave,
+	  with a simulated master stimulating it for test purposes. This
+	  avoids to wait a long time to see how PPSi behaves.
+	  This architecture uses standard Unix system calls, but the
+	  code includes some Linux dependencies.
+
+endchoice
+
+config ARCH
+       string
+       default "unix" if ARCH_UNIX
+       default "bare-i386" if ARCH_BARE_I386
+       default "bare-x86-64" if ARCH_BARE_X86_64
+       default "wrpc" if ARCH_WRPC
+       default "wrs" if ARCH_WRS
+       default "sim" if ARCH_SIMULATOR
+
+menu "PTP Protocol Options"
+        choice
+                prompt "PTP Synchronization Mechanism"
+        config E2E
+                boolean "Delay-Request-Respond"
+                help
+                  Delay-Request-Response uses 4 timestamps
+                  for calculating the link delay and synchronizing.
+        config P2P
+                boolean "Peer Delay"
+                help
+                  Peer Delay uses 4 timestamps for calculating
+                  the link delay and another 2 for synchronizing.
+        endchoice
+
+	config E2E_ONLY
+		boolean "Avoid building P2P code"
+		depends on E2E
+		default y if E2E && (ARCH_BARE_I386 || ARCH_BARE_X86_64)
+		help
+		  If you choose E2E above, P2P is built anyways,
+		  and you can choose at runtime what to run.
+		  This disables P2P code, for size reasons on wrpc-sw
+
+	config HAS_P2P
+	       int
+	       default 0 if E2E_ONLY
+	       default 1  
+
+endmenu
+
+config ASSERT
+	bool "Build assertion checks in the code"
+	default n
+	  help
+	    Build assertions in the code, to catch unexpected situations.
+	    When an assertion fails the code loops over repeating the
+	    error message every second. OTOH, panic() is always built,
+	    with no Kconfig -- and it does the same, unconditionally.
+
+config EXT_WR
+	bool
+	default y if ARCH_WRS || ARCH_WRPC
+
+config EXT_NONE
+	bool
+	default !EXT_WR
+
+config EXTENSION
+       string
+       default "whiterabbit" if EXT_WR
+       default "" if EXT_NONE
+
+
+
+config CROSS_COMPILE
+       string "Cross compiler prefix"
+       default "/opt/gcc-lm32/bin/lm32-elf-" if ARCH_WRPC
+       default "/opt/arm-wrswitch/bin/arm-linux-" if ARCH_WRS
+       default ""
+
+config ARCH_CFLAGS
+       string
+       default "-m32" if ARCH_BARE_I386
+       default "-m64" if ARCH_BARE_X86_64
+       default ""
+
+config ARCH_LDFLAGS
+       string
+       default "-m elf_i386" if ARCH_BARE_I386
+       default "-m elf_x86_64" if ARCH_BARE_X86_64
+       default ""
+
+config WRPCSW_ROOT
+       string "Source location of wrpc-sw"
+       depends on ARCH_WRPC
+       default "../wrpc-sw"
+
+# Vlan support: not all architectures have it, so this is set by them
+config HAS_VLAN
+	bool
+
+config HAS_MULTIPLE_VLAN
+	bool
+
+config VLAN
+	bool "Enable VLAN support for raw Ethernet"
+	depends on HAS_VLAN || HAS_MULTIPLE_VLAN
+	default y
+	help
+	  PPSI is able to directly emit and receive tagged frames,
+	  with some architectures (if you see this option, it means
+	  the architecture you selected has such support). A
+	  designated master port can send announce on several VLANs,
+	  but the other roles (designated slave or auto) can only bind
+	  to a single VLAN.  This choice is a tradeoff between code
+	  complexity and flexibility.
+	  
+	  Please note that you can always create several PTP ports that
+	  act on different VLANs on the same physical port, and you can
+	  also run VLAN support in your OS without special PPSI code.
+	  Please see the PPSI documentation for details.
+
+config MAX_VLANS_PER_PORT
+	int "Maximum number of VLANs per port"
+	depends on HAS_MULTIPLE_VLAN
+	default 32
+	help
+	  This configuration option is mainly used to support
+	  the special case of 1 VLAN per port, useful for
+	  microcontroller-class architectures.  Hosted builds
+	  feature a bigger default, because they have no size constraints.
+
+
+# I want a number, to be used without ifdef
+config VLAN_ARRAY_SIZE
+       int
+       default 0 if !VLAN
+       default 1 if !HAS_MULTIPLE_VLAN
+       default MAX_VLANS_PER_PORT
+
+config DISABLE_OPTIMIZATION
+	bool "Disable -O2, to ease running a debugger"
+
+config OPTIMIZATION
+	int
+	default 0 if DISABLE_OPTIMIZATION
+	default 2
+
+config WRPC_FAULTS
+	bool "Add the fault injection mechanism and shell command for wrpc"
+	depends on ARCH_WRPC
+	help
+	  This adds a "fault" shell command, with subcommands.
+	  The same mechanisms are available in the wr switch, through
+	  the configuration file.
